@@ -25,7 +25,7 @@
     --blue:#007AFF;  --green:#34C759;  --red:#FF3B30;  --orange:#FF9500;
     --bg:#F2F2F7;                 /* systemGroupedBackground */
     --card:#FFFFFF;               /* secondarySystemGroupedBackground */
-    --bar:rgba(242,242,247,.82);  /* 导航栏毛玻璃底色 */
+    --bar:rgba(255,255,255,.52);  /* 导航栏毛玻璃底色（半透，看得见背后光斑） */
     --label:#000000;
     --label-2:rgba(60,60,67,.6);  /* secondaryLabel */
     --label-3:rgba(60,60,67,.3);  /* tertiaryLabel */
@@ -37,6 +37,12 @@
     --tint-green:rgba(52,199,89,.16);
     --tint-orange:rgba(255,149,0,.16);
     --radius:12px;
+    /* 字体：统一微软雅黑 Light。
+       Chromium 用 DirectWrite，会把 msyh/msyhbd/msyhl 合成一个 "Microsoft YaHei" 家族，
+       所以 font-weight:300 能取到 Light 字面，600/700 拿到的是真粗体而不是合成加粗。
+       （实测：同一串文字 300 宽 328.42、400 宽 337.68、700 宽 346.04，三者不同即证明有效）*/
+    --font-sans:"Microsoft YaHei","Microsoft YaHei UI","Microsoft YaHei Light",
+                "PingFang SC","Hiragino Sans GB","Segoe UI",sans-serif;
     /* 毛玻璃：噪点 + 高光 + 底色 + 受光边，四层叠出质感
        噪点用 SVG feTurbulence 生成（技法参考 github.com/SquareMediaGroup/glassfx），
        它同时能盖住大色块渐变容易出现的色带 */
@@ -51,7 +57,7 @@
     --blue:#0A84FF;  --green:#30D158;  --red:#FF453A;  --orange:#FF9F0A;
     --bg:#000000;
     --card:#1C1C1E;
-    --bar:rgba(0,0,0,.78);
+    --bar:rgba(22,22,26,.46);
     --label:#FFFFFF;
     --label-2:rgba(235,235,245,.6);
     --label-3:rgba(235,235,245,.3);
@@ -76,8 +82,7 @@
     margin:0;
     background:var(--bg);
     color:var(--label);
-    font:400 16px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",
-         "PingFang SC","Hiragino Sans GB","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+    font:300 16px/1.45 var(--font-sans);
     -webkit-font-smoothing:antialiased;
     -webkit-text-size-adjust:100%;
   }
@@ -89,23 +94,35 @@
             calc(60px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   }
 
-  /* ---------- 导航栏（大标题 + 毛玻璃，随页面吸附） ---------- */
+  /* ---------- 导航栏：悬浮圆角玻璃条 ---------- */
   header{
-    position:sticky;top:0;z-index:20;
+    position:sticky;top:calc(10px + env(safe-area-inset-top));z-index:20;
     display:flex;align-items:center;gap:10px;
-    margin:0 calc(-20px - env(safe-area-inset-right)) 18px calc(-20px - env(safe-area-inset-left));
-    padding:calc(12px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right))
-            12px calc(20px + env(safe-area-inset-left));
+    margin:10px 0 18px;
+    padding:13px 18px;
+    border-radius:18px;
     background:var(--bar);
-    -webkit-backdrop-filter:saturate(180%) blur(20px);
-    backdrop-filter:saturate(180%) blur(20px);
-    border-bottom:.5px solid var(--sep);
+    -webkit-backdrop-filter:blur(30px) saturate(190%);
+    backdrop-filter:blur(30px) saturate(190%);
+    box-shadow:inset 0 .5px 0 var(--glass-line),0 8px 28px -14px rgba(0,0,0,.4);
+    isolation:isolate;
   }
   header h1{
-    font-size:30px;line-height:1.15;margin:0;letter-spacing:.3px;font-weight:700;
+    font-size:31px;line-height:1.15;margin:0;letter-spacing:.2px;font-weight:700;
   }
   header .today{display:none}          /* 日期挪到大标题下方，见 .page-sub */
   header .spacer{flex:1}
+
+  /* 待办 后面的问候语：按时间/节日轮换，换的时候滑入淡现 */
+  .greet{
+    font-size:15px;font-weight:400;color:var(--label-2);
+    margin-left:9px;white-space:nowrap;
+    animation:greetIn .55s cubic-bezier(.22,1,.36,1) both;
+  }
+  @keyframes greetIn{
+    from{opacity:0;transform:translateX(-8px)}
+    to{opacity:1;transform:none}
+  }
 
   .page-sub{
     margin:-8px 0 16px;font-size:15px;color:var(--label-2);
@@ -656,6 +673,7 @@
 
   <header>
     <h1>待办</h1>
+    <span class="greet" id="greet"></span>
     <span class="spacer"></span>
     <span class="sync-status off" id="syncStatus">仅本机</span>
     <button class="install-btn" id="installBtn" hidden>安装</button>
@@ -978,17 +996,14 @@
       .catch(function (e) { setSyncState('error', String(e)); });
   }
 
-  function startSync(firstRun) {
+  function startSync() {
     fetchJSON({ cache: 'no-store' })
       .then(function (doc) {
         sync.on = true;
         var merged = mergeTasks(tasks, doc.tasks || []);
         var changed = snapshot(merged) !== snapshot(tasks);
         tasks = merged;
-        if (firstRun && !tasks.length) {
-          seedExamples();          // 本机和服务端都空，才是真的第一次用
-          render();
-        } else if (changed) {
+        if (changed) {
           persist();
           render();
         }
@@ -1010,9 +1025,7 @@
         });
       })
       .catch(function () {
-        // 服务端没有同步接口（单机模式）：本机也空的话，给几条示例
-        if (firstRun && !tasks.length) { seedExamples(); render(); }
-        setSyncState('off');
+        setSyncState('off');   // 服务端没有同步接口，当单机用
       });
   }
 
@@ -1169,6 +1182,132 @@
             '<span class="txt">' + esc(t.title) + (t.done ? ' ✓' : '') + '</span></li>';
         }).join('')
       : '<li class="day-empty">这一天没有安排</li>';
+  }
+
+  /* ---------------- 问候语：按时间 + 节日动态轮换 ---------------- */
+  // 农历数据表（1900–2100）。每个十六进制数编码一年：
+  //   低 4 位 = 闰月月份（0 表示无闰月）
+  //   第 16 位 = 闰月是大月还是小月
+  //   高 12 位（0x8000 起）= 正月到腊月各月是大月(30)还是小月(29)
+  var LUNAR_INFO = [
+    0x04bd8,0x04ae0,0x0a570,0x054d5,0x0d260,0x0d950,0x16554,0x056a0,0x09ad0,0x055d2,
+    0x04ae0,0x0a5b6,0x0a4d0,0x0d250,0x1d255,0x0b540,0x0d6a0,0x0ada2,0x095b0,0x14977,
+    0x04970,0x0a4b0,0x0b4b5,0x06a50,0x06d40,0x1ab54,0x02b60,0x09570,0x052f2,0x04970,
+    0x06566,0x0d4a0,0x0ea50,0x06e95,0x05ad0,0x02b60,0x186e3,0x092e0,0x1c8d7,0x0c950,
+    0x0d4a0,0x1d8a6,0x0b550,0x056a0,0x1a5b4,0x025d0,0x092d0,0x0d2b2,0x0a950,0x0b557,
+    0x06ca0,0x0b550,0x15355,0x04da0,0x0a5b0,0x14573,0x052b0,0x0a9a8,0x0e950,0x06aa0,
+    0x0aea6,0x0ab50,0x04b60,0x0aae4,0x0a570,0x05260,0x0f263,0x0d950,0x05b57,0x056a0,
+    0x096d0,0x04dd5,0x04ad0,0x0a4d0,0x0d4d4,0x0d250,0x0d558,0x0b540,0x0b6a0,0x195a6,
+    0x095b0,0x049b0,0x0a974,0x0a4b0,0x0b27a,0x06a50,0x06d40,0x0af46,0x0ab60,0x09570,
+    0x04af5,0x04970,0x064b0,0x074a3,0x0ea50,0x06b58,0x05ac0,0x0ab60,0x096d5,0x092e0,
+    0x0c960,0x0d954,0x0d4a0,0x0da50,0x07552,0x056a0,0x0abb7,0x025d0,0x092d0,0x0cab5,
+    0x0a950,0x0b4a0,0x0baa4,0x0ad50,0x055d9,0x04ba0,0x0a5b0,0x15176,0x052b0,0x0a930,
+    0x07954,0x06aa0,0x0ad50,0x05b52,0x04b60,0x0a6e6,0x0a4e0,0x0d260,0x0ea65,0x0d530,
+    0x05aa0,0x076a3,0x096d0,0x04afb,0x04ad0,0x0a4d0,0x1d0b6,0x0d250,0x0d520,0x0dd45,
+    0x0b5a0,0x056d0,0x055b2,0x049b0,0x0a577,0x0a4b0,0x0aa50,0x1b255,0x06d20,0x0ada0,
+    0x14b63,0x09370,0x049f8,0x04970,0x064b0,0x168a6,0x0ea50,0x06b20,0x1a6c4,0x0aae0,
+    0x0a2e0,0x0d2e3,0x0c960,0x0d557,0x0d4a0,0x0da50,0x05d55,0x056a0,0x0a6d0,0x055d4,
+    0x052d0,0x0a9b8,0x0a950,0x0b4a0,0x0b6a6,0x0ad50,0x055a0,0x0aba4,0x0a5b0,0x052b0,
+    0x0b273,0x06930,0x07337,0x06aa0,0x0ad50,0x14b55,0x04b60,0x0a570,0x054e4,0x0d160,
+    0x0e968,0x0d520,0x0daa0,0x16aa6,0x056d0,0x04ae0,0x0a9d4,0x0a2d0,0x0d150,0x0f252,
+    0x0d520
+  ];
+
+  function lunarLeapMonth(y) { return LUNAR_INFO[y - 1900] & 0xf; }
+  function lunarLeapDays(y) { return lunarLeapMonth(y) ? ((LUNAR_INFO[y - 1900] & 0x10000) ? 30 : 29) : 0; }
+  function lunarMonthDays(y, m) { return (LUNAR_INFO[y - 1900] & (0x10000 >> m)) ? 30 : 29; }
+  function lunarYearDays(y) {
+    var sum = 348;
+    for (var i = 0x8000; i > 0x8; i >>= 1) sum += (LUNAR_INFO[y - 1900] & i) ? 1 : 0;
+    return sum + lunarLeapDays(y);
+  }
+
+  // 公历 -> 农历。以 1900-01-31（农历正月初一）为基准逐日累减。
+  function solarToLunar(y, m, d) {
+    var offset = (Date.UTC(y, m - 1, d) - Date.UTC(1900, 0, 31)) / 86400000;
+    var i, temp = 0;
+    for (i = 1900; i < 2101 && offset > 0; i++) { temp = lunarYearDays(i); offset -= temp; }
+    if (offset < 0) { offset += temp; i--; }
+    var year = i, leap = lunarLeapMonth(year), isLeap = false;
+    for (i = 1; i < 13 && offset > 0; i++) {
+      if (leap > 0 && i === leap + 1 && !isLeap) { --i; isLeap = true; temp = lunarLeapDays(year); }
+      else temp = lunarMonthDays(year, i);
+      if (isLeap && i === leap + 1) isLeap = false;
+      offset -= temp;
+    }
+    if (offset === 0 && leap > 0 && i === leap + 1) {
+      if (isLeap) { isLeap = false; } else { isLeap = true; --i; }
+    }
+    if (offset < 0) { offset += temp; --i; }
+    return { month: i, day: offset + 1, isLeap: isLeap };
+  }
+
+  // 公历节日
+  var SOLAR_FESTIVAL = {
+    '1-1': '元旦快乐', '2-14': '情人节快乐', '3-8': '节日快乐', '3-12': '植树节',
+    '4-1': '愚人节', '5-1': '劳动节快乐', '5-4': '青年节快乐', '6-1': '儿童节快乐',
+    '7-1': '建党节', '8-1': '建军节', '9-10': '教师节快乐', '10-1': '国庆快乐',
+    '12-24': '平安夜快乐', '12-25': '圣诞快乐'
+  };
+  // 农历节日（键是「月-日」）
+  var LUNAR_FESTIVAL = {
+    '1-1': '新年快乐 · 春节好', '1-15': '元宵节快乐', '5-5': '端午安康',
+    '7-7': '七夕快乐', '8-15': '中秋快乐', '9-9': '重阳安康', '12-8': '腊八节'
+  };
+
+  // 各时段的问候，每个时段备几句，好让它可以轮换
+  var TIME_GREET = [
+    { to: 5,  list: ['夜深了', '早点休息', '晚安'] },
+    { to: 9,  list: ['早上好', '早安', '新的一天', '早上好呀'] },
+    { to: 12, list: ['上午好', '上午顺利', '上午好呀'] },
+    { to: 14, list: ['中午好', '该吃饭了', '午安'] },
+    { to: 18, list: ['下午好', '下午加油', '下午好呀'] },
+    { to: 23, list: ['晚上好', '晚上好呀', '今天辛苦了'] },
+    { to: 24, list: ['夜深了', '早点睡', '晚安'] }
+  ];
+
+  function dayOfYear(d) {
+    return Math.floor((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+                     - Date.UTC(d.getFullYear(), 0, 0)) / 86400000);
+  }
+
+  function greetingText(d) {
+    var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+
+    var s = SOLAR_FESTIVAL[m + '-' + day];
+    if (s) return s;
+
+    var l = solarToLunar(y, m, day);
+    if (!l.isLeap) {
+      var lf = LUNAR_FESTIVAL[l.month + '-' + l.day];
+      if (lf) return lf;
+      // 除夕：农历腊月里，第二天就是正月初一的那天
+      if (l.month === 12) {
+        var nx = new Date(y, m - 1, day + 1);
+        var nl = solarToLunar(nx.getFullYear(), nx.getMonth() + 1, nx.getDate());
+        if (nl.month === 1 && nl.day === 1) return '除夕快乐 · 新年将至';
+      }
+    }
+
+    var h = d.getHours(), slot = TIME_GREET[TIME_GREET.length - 1];
+    for (var i = 0; i < TIME_GREET.length; i++) {
+      if (h < TIME_GREET[i].to) { slot = TIME_GREET[i]; break; }
+    }
+    // 按「第几天 + 第几小时」取，同一小时内稳定，过一小时自动换一句
+    return slot.list[(dayOfYear(d) + h) % slot.list.length];
+  }
+
+  var lastGreet = null;
+  function updateGreeting() {
+    var el = document.getElementById('greet');
+    if (!el) return;
+    var t = greetingText(new Date());
+    if (t === lastGreet) return;            // 没变就别重放动画
+    lastGreet = t;
+    el.textContent = t;
+    el.style.animation = 'none';
+    void el.offsetWidth;                    // 强制回流，让动画能重新触发
+    el.style.animation = '';
   }
 
   /* ---------------- 渲染：倒计时 ---------------- */
@@ -1691,49 +1830,25 @@
   });
 
   /* ---------------- 启动 ---------------- */
-  // 首次使用给几条示例，方便看清效果。
-  // 关键：只有「本机没数据」且「服务端也没数据」才算真首次。
-  // 否则新设备一接入同步，就会把这 3 条示例塞进大家共享的清单里。
-  function seedExamples() {
-    var base = new Date(); base.setMinutes(0, 0, 0);
-    function at(dayOffset, h) {
-      var x = new Date(base); x.setDate(x.getDate() + dayOffset); x.setHours(h);
-      return toInputValue(x);
-    }
-    var now0 = Date.now();
-    function seed(title, time, done, ago) {
-      return {
-        id: uid(), title: title, time: time, done: done,
-        createdAt: now0 - ago, doneAt: done ? now0 - ago + 500 : null,
-        updatedAt: now0 - ago, deleted: false
-      };
-    }
-    tasks = [
-      seed('浏览一下这个页面的用法', at(0, Math.min(23, base.getHours() + 1)), false, 3000),
-      seed('把「交实验报告」这类事项填进来', at(1, 9), false, 2000),
-      seed('这是一条已完成的示例', at(-1, 15), true, 1000)
-    ];
-    persist();
-  }
-
   (function init() {
     var d = new Date();
     document.getElementById('todayLabel').textContent =
       d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK[d.getDay()];
 
-    var firstRun = localStorage.getItem(STORE_KEY) === null;
     timeInput.value = defaultTime();   // 预填「一小时后」，可直接改
+    updateGreeting();                  // 「待办」后面的问候语
     applyCollapse();                   // 恢复上次的折叠状态
     setSyncState('off');
     render();
     titleInput.focus();
-    startSync(firstRun);               // 服务端有接口就自动接入同步
+    startSync();                       // 服务端有接口就自动接入同步
   })();
 
-  // 跨天时刷新「今天」高亮
+  // 每分钟检查一次：跨天刷新「今天」高亮，跨时段/跨节日自动换问候语
   setInterval(function () {
     var d = new Date();
     if (d.getDate() !== now.getDate()) { now = d; render(); }
+    updateGreeting();
   }, 60000);
 })();
 </script>
