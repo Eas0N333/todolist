@@ -1,0 +1,13 @@
+# 依赖：400MB+，用 npm install 还原即可
+desktop/node_modules/
+
+# 打包产物：免安装 exe 有 80MB，不进仓库（需要的话本地 npm run dist 生成）
+desktop/dist/
+
+# 待办数据：私人内容，绝对不要提交（程序首次运行会自动创建）
+data/
+
+# 编辑器 / 系统杂项
+.DS_Store
+Thumbs.db
+*.log

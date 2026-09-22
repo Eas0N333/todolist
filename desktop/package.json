@@ -1,0 +1,55 @@
+{
+  "name": "my-todo-desktop",
+  "productName": "我的待办",
+  "version": "1.0.0",
+  "description": "我的待办 · 日历 —— 桌面客户端",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "local.mytodo.desktop",
+    "productName": "我的待办",
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../index.html",
+        "to": "app-web/index.html"
+      },
+      {
+        "from": "../sw.js",
+        "to": "app-web/sw.js"
+      },
+      {
+        "from": "../manifest.webmanifest",
+        "to": "app-web/manifest.webmanifest"
+      },
+      {
+        "from": "../icons",
+        "to": "app-web/icons"
+      },
+      {
+        "from": "../server.js",
+        "to": "app-web/server.js"
+      }
+    ],
+    "win": {
+      "icon": "../icons/app.ico",
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "我的待办-${version}.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.15.3"
+  }
+}
